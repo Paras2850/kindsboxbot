@@ -16,7 +16,8 @@ export const env = {
     return str("TELEGRAM_WEBHOOK_SECRET");
   },
   get webhookUrl() {
-    return str("WEBHOOK_URL");
+    const raw = str("WEBHOOK_URL") || str("WEBHOOK_BASE_URL") || str("NEXT_PUBLIC_APP_URL");
+    return raw.replace(/\/+$/, "");
   },
   get adminTelegramIds() {
     const raw = str("ADMIN_TELEGRAM_IDS") || str("TELEGRAM_ADMIN_ID") || str("TELEGRAM_ADMIN_IDS");

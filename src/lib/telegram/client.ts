@@ -128,13 +128,16 @@ export async function answerCallbackQuery(callbackQueryId: string, text?: string
   });
 }
 
-export async function setWebhook(url: string, secretToken: string) {
-  return callApi("setWebhook", {
+export async function setWebhook(url: string, secretToken?: string) {
+  const payload: Record<string, unknown> = {
     url,
-    secret_token: secretToken,
     allowed_updates: ["message", "callback_query"],
     drop_pending_updates: false,
-  });
+  };
+  if (secretToken && secretToken.trim().length > 0) {
+    payload.secret_token = secretToken.trim();
+  }
+  return callApi("setWebhook", payload);
 }
 
 export async function deleteWebhook() {
