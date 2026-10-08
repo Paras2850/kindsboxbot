@@ -10,7 +10,7 @@ function str(name: string, fallback = ""): string {
 
 export const env = {
   get botToken() {
-    return str("BOT_TOKEN");
+    return str("BOT_TOKEN") || str("TELEGRAM_BOT_TOKEN");
   },
   get telegramWebhookSecret() {
     return str("TELEGRAM_WEBHOOK_SECRET");
@@ -19,7 +19,8 @@ export const env = {
     return str("WEBHOOK_URL");
   },
   get adminTelegramIds() {
-    return str("ADMIN_TELEGRAM_IDS")
+    const raw = str("ADMIN_TELEGRAM_IDS") || str("TELEGRAM_ADMIN_ID") || str("TELEGRAM_ADMIN_IDS");
+    return raw
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean)
