@@ -61,23 +61,40 @@ export async function handleAdminVideoMessage(message: TelegramMessage, adminLab
  * Automatically imports videos posted into the configured private Telegram storage channel.
  */
 export async function handleChannelPost(message: TelegramMessage): Promise<void> {
-  const chatId = message.chat.id;
-  const configuredStorageId = await getSetting("STORAGE_CHAT_ID");
+  const chat = message.chat;
+  const chatId = chat.id;
+  const configuredStorageId = ((await getSetting("STORAGE_CHAT_ID")) || process.env.STORAGE_CHAT_ID || "").trim();
 
-  console.log(`[channel_post] Received post from chat_id=${chatId} (message_id=${message.message_id})`);
+  console.log(`[channel_post] Received post id=${message.message_id} from chat_id=${chatId} title="${chat.title || ""}"`);
 
-  // Verify chat ID if STORAGE_CHAT_ID is set
-  if (configuredStorageId && configuredStorageId.trim().length > 0) {
-    const cleanConfig = configuredStorageId.trim();
+  // Verify chat ID if STORAGE_CHAT_ID is configured
+  if (configuredStorageId.length > 0) {
     const chatIdStr = String(chatId);
-    const matches =
-      chatIdStr === cleanConfig ||
-      chatIdStr.replace(/^-100/, "") === cleanConfig.replace(/^-100/, "");
+    let matches = false;
+
+    // Direct match (e.g. -1001234567890)
+    if (chatIdStr === configuredStorageId) {
+      matches = true;
+    }
+    // Match stripped prefix (e.g. 1234567890 vs -1001234567890)
+    else if (chatIdStr.replace(/^-100/, "") === configuredStorageId.replace(/^-100/, "")) {
+      matches = true;
+    }
+    // Match username if channel has a username and user configured @handle
+    else if (chat.username && chat.username.toLowerCase() === configuredStorageId.replace(/^@/, "").toLowerCase()) {
+      matches = true;
+    }
 
     if (!matches) {
-      console.log(`[channel_post] Ignored: chat_id ${chatId} does not match STORAGE_CHAT_ID (${cleanConfig})`);
+      console.log(
+        `[channel_post] ⚠️ Ignored post: chat_id "${chatId}" does not match configured STORAGE_CHAT_ID "${configuredStorageId}"`,
+      );
       return;
     }
+  } else {
+    console.warn(
+      `[channel_post] ⚠️ STORAGE_CHAT_ID is not configured in Admin Settings or env! Auto-importing from channel ${chatId}. Tip: Set STORAGE_CHAT_ID="${chatId}" in Settings to restrict imports.`,
+    );
   }
 
   let media: TelegramVideo | TelegramDocument | undefined = message.video;
@@ -86,7 +103,7 @@ export async function handleChannelPost(message: TelegramMessage): Promise<void>
   }
 
   if (!media) {
-    console.log(`[channel_post] Ignored post ${message.message_id}: no video or supported video document attached`);
+    console.log(`[channel_post] Ignored post id=${message.message_id}: no video or supported video document attached`);
     return;
   }
 
@@ -97,7 +114,7 @@ export async function handleChannelPost(message: TelegramMessage): Promise<void>
       caption: message.caption ?? null,
       fileSize: media.file_size ?? null,
       durationSeconds: "duration" in media ? media.duration ?? null : null,
-      addedBy: `channel:${message.chat.title || chatId} (${message.message_id})`,
+      addedBy: `channel:${chat.title || chatId} (${message.message_id})`,
     });
 
     console.log(

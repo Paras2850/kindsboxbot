@@ -24,6 +24,10 @@ export async function POST(req: NextRequest) {
     console.log(
       `[webhook] Received channel_post id=${update.channel_post.message_id} from chat=${update.channel_post.chat.id} has_video=${Boolean(update.channel_post.video)} has_doc=${Boolean(update.channel_post.document)}`,
     );
+  } else if (update.edited_channel_post) {
+    console.log(
+      `[webhook] Received edited_channel_post id=${update.edited_channel_post.message_id} from chat=${update.edited_channel_post.chat.id}`,
+    );
   }
 
   // Always respond quickly with 200 so Telegram doesn't retry; process inline
