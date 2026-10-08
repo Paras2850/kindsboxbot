@@ -18,6 +18,27 @@ export async function createVideo(input: {
   durationSeconds?: number | null;
   addedBy?: string | null;
 }): Promise<Video> {
+  // Prevent duplicates if already imported (e.g. webhook retries)
+  if (input.fileUniqueId) {
+    const [existing] = await db
+      .select()
+      .from(videos)
+      .where(eq(videos.fileUniqueId, input.fileUniqueId))
+      .limit(1);
+    if (existing) {
+      return existing;
+    }
+  }
+
+  const [existingByFileId] = await db
+    .select()
+    .from(videos)
+    .where(eq(videos.telegramFileId, input.telegramFileId))
+    .limit(1);
+  if (existingByFileId) {
+    return existingByFileId;
+  }
+
   const sequence = await getNextSequence();
   const [video] = await db
     .insert(videos)

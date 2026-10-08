@@ -3,7 +3,7 @@ import { answerCallbackQuery, sendMessage } from "@/lib/telegram/client";
 import { upsertTelegramUser, getUserByTelegramId } from "@/lib/services/userService";
 import { isMaintenanceMode, isFreeMode } from "@/lib/services/settingsService";
 import { isTelegramAdmin } from "@/lib/env";
-import { handleAdminVideoMessage } from "@/lib/bot/adminUpload";
+import { handleAdminVideoMessage, handleChannelPost } from "@/lib/bot/adminUpload";
 import {
   handleBuyPlan,
   handleCheckPayment,
@@ -24,6 +24,10 @@ export async function processUpdate(update: TelegramUpdate): Promise<void> {
   try {
     if (update.message) {
       await processMessage(update.message);
+    } else if (update.channel_post) {
+      await handleChannelPost(update.channel_post);
+    } else if (update.edited_channel_post) {
+      await handleChannelPost(update.edited_channel_post);
     } else if (update.callback_query) {
       await processCallbackQuery(update.callback_query);
     }

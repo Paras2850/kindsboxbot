@@ -20,8 +20,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "invalid json" }, { status: 400 });
   }
 
+  if (update.channel_post) {
+    console.log(
+      `[webhook] Received channel_post id=${update.channel_post.message_id} from chat=${update.channel_post.chat.id} has_video=${Boolean(update.channel_post.video)} has_doc=${Boolean(update.channel_post.document)}`,
+    );
+  }
+
   // Always respond quickly with 200 so Telegram doesn't retry; process inline
-  // since this is a single long-running Node process (not serverless).
   try {
     await processUpdate(update);
   } catch (err) {

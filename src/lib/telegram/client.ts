@@ -131,7 +131,7 @@ export async function answerCallbackQuery(callbackQueryId: string, text?: string
 export async function setWebhook(url: string, secretToken?: string) {
   const payload: Record<string, unknown> = {
     url,
-    allowed_updates: ["message", "callback_query"],
+    allowed_updates: ["message", "callback_query", "channel_post", "edited_channel_post"],
     drop_pending_updates: false,
   };
   if (secretToken && secretToken.trim().length > 0) {
@@ -164,7 +164,7 @@ export async function getUpdates(offset?: number, limit = 100, timeout = 30) {
     offset,
     limit,
     timeout,
-    allowed_updates: ["message", "callback_query"],
+    allowed_updates: ["message", "callback_query", "channel_post", "edited_channel_post"],
   });
 }
 
