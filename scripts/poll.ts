@@ -1,6 +1,7 @@
 import "dotenv/config";
-import { deleteWebhook, getMe, getUpdates } from "../src/lib/telegram/client";
+import { deleteWebhook, getMe, getUpdates, setWebhook } from "../src/lib/telegram/client";
 import { processUpdate } from "../src/lib/bot/router";
+import { env } from "../src/lib/env";
 
 async function main() {
   console.log("=========================================");
@@ -16,21 +17,32 @@ async function main() {
   console.log(`✅ Logged in as @${me.username} (${me.first_name})`);
 
   // Clear existing webhook so getUpdates works without conflict
-  console.log("🧹 Clearing webhook to enable polling...");
+  console.log("⚠️ NOTICE: Polling mode clears the Telegram webhook while running.");
+  console.log("🧹 Clearing webhook to enable local polling...");
   await deleteWebhook();
   console.log("🚀 Polling started. Listening for /start, /video, /plan, /status, etc. (Press Ctrl+C to stop)");
 
   let offset = 0;
   let running = true;
 
-  process.on("SIGINT", () => {
+  const restoreWebhook = async () => {
+    if (env.webhookUrl && !env.webhookUrl.includes("localhost")) {
+      console.log(`🔄 Restoring production webhook to ${env.webhookUrl}/api/telegram/webhook...`);
+      await setWebhook(`${env.webhookUrl}/api/telegram/webhook`, env.telegramWebhookSecret);
+      console.log("✅ Production webhook restored successfully!");
+    }
+  };
+
+  process.on("SIGINT", async () => {
     console.log("\n🛑 Stopping polling worker...");
     running = false;
+    await restoreWebhook().catch(() => {});
     process.exit(0);
   });
 
-  process.on("SIGTERM", () => {
+  process.on("SIGTERM", async () => {
     running = false;
+    await restoreWebhook().catch(() => {});
     process.exit(0);
   });
 
