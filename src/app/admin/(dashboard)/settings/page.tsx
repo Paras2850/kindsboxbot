@@ -51,6 +51,15 @@ export default function SettingsPage() {
   const [newPlanDays, setNewPlanDays] = useState("30");
   const [creatingPlan, setCreatingPlan] = useState(false);
 
+  // Admin credentials state
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newUsername, setNewUsername] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmNewPassword, setConfirmNewPassword] = useState("");
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [savingCredentials, setSavingCredentials] = useState(false);
+
   async function load() {
     setLoading(true);
     try {
@@ -211,6 +220,70 @@ export default function SettingsPage() {
       toast.show("Error creating plan", "error");
     } finally {
       setCreatingPlan(false);
+    }
+  }
+
+  async function handleChangeCredentials(e: React.FormEvent) {
+    e.preventDefault();
+    if (!currentPassword) {
+      toast.show("Please enter your current password to authorize changes.", "error");
+      return;
+    }
+
+    const trimmedUsername = newUsername.trim();
+    if (!trimmedUsername && !newPassword) {
+      toast.show("Please enter a new username or new password to update.", "error");
+      return;
+    }
+
+    if (newPassword) {
+      if (newPassword.length < 12) {
+        toast.show("New password must be at least 12 characters long.", "error");
+        return;
+      }
+      if (newPassword !== confirmNewPassword) {
+        toast.show("New password and confirmation do not match.", "error");
+        return;
+      }
+    }
+
+    setSavingCredentials(true);
+    try {
+      const res = await fetch("/api/admin/auth/change-credentials", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          currentPassword,
+          newUsername: trimmedUsername || undefined,
+          newPassword: newPassword || undefined,
+          confirmNewPassword: confirmNewPassword || undefined,
+        }),
+      });
+
+      const resJson = await res.json().catch(() => null);
+      if (res.ok && resJson?.ok) {
+        if (resJson.reloginRequired) {
+          toast.show("Password updated! Redirecting to login...", "success");
+          setTimeout(() => {
+            window.location.href = "/admin/login";
+          }, 1500);
+        } else {
+          toast.show(resJson.message || "Admin credentials updated successfully.", "success");
+          setCurrentPassword("");
+          setNewUsername("");
+          setNewPassword("");
+          setConfirmNewPassword("");
+          setTimeout(() => {
+            window.location.reload();
+          }, 1000);
+        }
+      } else {
+        toast.show(resJson?.error || "Failed to update credentials", "error");
+      }
+    } catch {
+      toast.show("Network error while updating credentials", "error");
+    } finally {
+      setSavingCredentials(false);
     }
   }
 
@@ -405,6 +478,123 @@ export default function SettingsPage() {
           </div>
         </Card>
       </form>
+
+      {/* Admin Account Security Section */}
+      <Card>
+        <div className="mb-4">
+          <div className="flex items-center gap-2">
+            <span className="text-lg">🔐</span>
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-400">
+              Admin Account Security
+            </h2>
+          </div>
+          <p className="mt-1 text-xs text-slate-400">
+            Change your administrator login username or password. Current password is required to verify your identity.
+          </p>
+        </div>
+
+        <form onSubmit={handleChangeCredentials} className="space-y-4">
+          <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3.5 text-xs text-amber-300">
+            <span className="font-semibold">Security Note:</span> If you change your password, your active session will be signed out and you will be redirected to log in with your new credentials. New passwords must be at least 12 characters.
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            {/* Current Password */}
+            <div className="sm:col-span-2">
+              <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-400">
+                Current Password <span className="text-rose-400">*</span>
+              </label>
+              <div className="relative">
+                <Input
+                  type={showCurrentPassword ? "text" : "password"}
+                  placeholder="Enter your current password to authorize changes"
+                  value={currentPassword}
+                  onChange={(e) => setCurrentPassword(e.target.value)}
+                  autoComplete="current-password"
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowCurrentPassword((prev) => !prev)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-medium text-slate-400 hover:text-slate-200"
+                >
+                  {showCurrentPassword ? "Hide" : "Show"}
+                </button>
+              </div>
+            </div>
+
+            {/* New Username (Optional) */}
+            <div className="sm:col-span-2">
+              <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-400">
+                New Username <span className="text-slate-500 font-normal normal-case">(optional - leave blank to keep current)</span>
+              </label>
+              <Input
+                type="text"
+                placeholder="Leave blank to keep current username"
+                value={newUsername}
+                onChange={(e) => setNewUsername(e.target.value)}
+                autoComplete="username"
+              />
+              <p className="mt-1 text-[11px] text-slate-500">
+                Allowed: 3–64 characters (letters, numbers, underscores, hyphens).
+              </p>
+            </div>
+
+            {/* New Password (Optional) */}
+            <div>
+              <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-400">
+                New Password <span className="text-slate-500 font-normal normal-case">(optional - min 12 characters)</span>
+              </label>
+              <div className="relative">
+                <Input
+                  type={showNewPassword ? "text" : "password"}
+                  placeholder="At least 12 characters"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  autoComplete="new-password"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowNewPassword((prev) => !prev)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-medium text-slate-400 hover:text-slate-200"
+                >
+                  {showNewPassword ? "Hide" : "Show"}
+                </button>
+              </div>
+              <p className="mt-1 text-[11px] text-slate-500">
+                Must include both letters and numbers/symbols.
+              </p>
+            </div>
+
+            {/* Confirm New Password */}
+            <div>
+              <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-400">
+                Confirm New Password
+              </label>
+              <Input
+                type={showNewPassword ? "text" : "password"}
+                placeholder="Re-enter new password"
+                value={confirmNewPassword}
+                onChange={(e) => setConfirmNewPassword(e.target.value)}
+                autoComplete="new-password"
+                disabled={!newPassword}
+              />
+              {newPassword && confirmNewPassword && newPassword !== confirmNewPassword && (
+                <p className="mt-1 text-[11px] text-rose-400">Passwords do not match.</p>
+              )}
+            </div>
+          </div>
+
+          <div className="mt-4 flex justify-end">
+            <Button
+              type="submit"
+              disabled={savingCredentials || !currentPassword || (!newUsername.trim() && !newPassword)}
+            >
+              {savingCredentials ? "Updating Credentials..." : "Update Admin Credentials"}
+            </Button>
+          </div>
+        </form>
+      </Card>
 
       {/* Subscription Plans Section */}
       <Card>
