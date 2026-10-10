@@ -16,16 +16,25 @@ export async function register() {
 
   console.log("[bot] Background job scheduler started (every 5 minutes).");
 
-  // Best-effort: automatically (re)register the Telegram webhook on boot if
-  // the bot and a public webhook URL are configured.
+  // Automatically synchronize Telegram webhook on boot if not already pointing to production URL.
   try {
     const { isBotConfigured, env } = await import("@/lib/env");
-    if (isBotConfigured() && env.webhookUrl && !env.webhookUrl.includes("localhost")) {
-      const { setWebhook } = await import("@/lib/telegram/client");
-      await setWebhook(`${env.webhookUrl}/api/telegram/webhook`, env.telegramWebhookSecret);
-      console.log("[bot] Telegram webhook registered at boot.");
+    if (
+      isBotConfigured() &&
+      env.webhookUrl &&
+      !env.webhookUrl.includes("localhost") &&
+      !env.webhookUrl.includes("your-domain.com") &&
+      !env.webhookUrl.includes("example.com")
+    ) {
+      const { getWebhookInfo, setWebhook } = await import("@/lib/telegram/client");
+      const currentInfo = (await getWebhookInfo().catch(() => null)) as { url?: string } | null;
+      const targetUrl = `${env.webhookUrl}/api/telegram/webhook`;
+      if (currentInfo?.url !== targetUrl) {
+        await setWebhook(targetUrl, env.telegramWebhookSecret);
+        console.log(`[bot] Telegram webhook synchronized to ${targetUrl}`);
+      }
     }
   } catch (err) {
-    console.error("[bot] failed to auto-register webhook", err);
+    console.error("[bot] failed to synchronize webhook", err);
   }
 }

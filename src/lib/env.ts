@@ -16,8 +16,24 @@ export const env = {
     return str("TELEGRAM_WEBHOOK_SECRET");
   },
   get webhookUrl() {
-    const raw = str("WEBHOOK_URL") || str("WEBHOOK_BASE_URL") || str("NEXT_PUBLIC_APP_URL");
-    return raw.replace(/\/+$/, "");
+    const candidates = [
+      str("WEBHOOK_BASE_URL"),
+      str("WEBHOOK_URL"),
+      process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : "",
+      process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "",
+      str("NEXT_PUBLIC_APP_URL"),
+    ];
+    for (const c of candidates) {
+      if (
+        c &&
+        !c.includes("your-domain.com") &&
+        !c.includes("example.com") &&
+        !c.includes("localhost")
+      ) {
+        return c.replace(/\/+$/, "");
+      }
+    }
+    return "https://kindsboxbotadmin.vercel.app";
   },
   get adminTelegramIds() {
     const raw = str("ADMIN_TELEGRAM_IDS") || str("TELEGRAM_ADMIN_ID") || str("TELEGRAM_ADMIN_IDS");

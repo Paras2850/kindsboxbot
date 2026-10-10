@@ -16,6 +16,23 @@ async function main() {
 
   console.log(`✅ Logged in as @${me.username} (${me.first_name})`);
 
+  // Protect 24/7 production webhook mode
+  const isForced = process.argv.includes("--force");
+  if (!isForced && env.webhookUrl && !env.webhookUrl.includes("localhost")) {
+    console.log("==================================================================");
+    console.log("⚠️  WARNING: Production Cloud Webhook is Configured & Active!");
+    console.log(`   URL: ${env.webhookUrl}/api/telegram/webhook`);
+    console.log("------------------------------------------------------------------");
+    console.log("Your bot is already deployed on Vercel and runs 24/7 in the cloud.");
+    console.log("Running local polling will DISABLE cloud mode and make the bot");
+    console.log("shut down whenever your laptop is closed!");
+    console.log("");
+    console.log("If you really want to test polling locally, run:");
+    console.log("   npm run bot:poll -- --force");
+    console.log("==================================================================");
+    process.exit(0);
+  }
+
   // Clear existing webhook so getUpdates works without conflict
   console.log("⚠️ NOTICE: Polling mode clears the Telegram webhook while running.");
   console.log("🧹 Clearing webhook to enable local polling...");

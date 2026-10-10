@@ -129,6 +129,10 @@ export async function answerCallbackQuery(callbackQueryId: string, text?: string
 }
 
 export async function setWebhook(url: string, secretToken?: string) {
+  if (url.includes("your-domain.com") || url.includes("example.com")) {
+    console.error("[telegram] Refusing to set webhook to placeholder domain:", url);
+    return false;
+  }
   const payload: Record<string, unknown> = {
     url,
     allowed_updates: ["message", "callback_query", "channel_post", "edited_channel_post"],

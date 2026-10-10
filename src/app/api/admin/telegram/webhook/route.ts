@@ -16,9 +16,7 @@ export async function POST() {
   if (!isBotConfigured()) {
     return NextResponse.json({ ok: false, error: "BOT_TOKEN not configured" }, { status: 400 });
   }
-  if (!env.webhookUrl) {
-    return NextResponse.json({ ok: false, error: "WEBHOOK_URL not configured" }, { status: 400 });
-  }
-  const result = await setWebhook(`${env.webhookUrl}/api/telegram/webhook`, env.telegramWebhookSecret);
-  return NextResponse.json({ ok: Boolean(result), result });
+  const targetUrl = `${env.webhookUrl}/api/telegram/webhook`;
+  const result = await setWebhook(targetUrl, env.telegramWebhookSecret);
+  return NextResponse.json({ ok: Boolean(result), result, url: targetUrl });
 }
