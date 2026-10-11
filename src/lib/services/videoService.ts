@@ -22,6 +22,7 @@ export interface CreateVideoInput {
   width?: number | null;
   height?: number | null;
   addedBy?: string | null;
+  uploadedAt?: Date | null;
 }
 
 export interface CreateVideoResult {
@@ -185,6 +186,7 @@ export async function createVideo(input: CreateVideoInput): Promise<CreateVideoR
           width: input.width ?? null,
           height: input.height ?? null,
           addedBy: input.addedBy ?? null,
+          uploadedAt: input.uploadedAt ?? new Date(),
         })
         .returning();
 
@@ -217,34 +219,39 @@ export interface NextVideoResult {
 export async function getNextVideoForUser(userId: number): Promise<NextVideoResult> {
   const repeatMode = await isRepeatMode();
 
-  if (!repeatMode) {
-    // Single efficient query using NOT EXISTS - avoids fetching delivery IDs over network
-    const [video] = await db
-      .select()
-      .from(videos)
-      .where(
-        and(
-          eq(videos.status, "active"),
-          notExists(
-            db
-              .select({ id: videoDeliveries.id })
-              .from(videoDeliveries)
-              .where(
-                and(
-                  eq(videoDeliveries.videoId, videos.id),
-                  eq(videoDeliveries.userId, userId),
-                ),
+  // 1. Always prioritize the newest UNSEEN active video: uploadedAt DESC, id DESC
+  const [unseenVideo] = await db
+    .select()
+    .from(videos)
+    .where(
+      and(
+        eq(videos.status, "active"),
+        notExists(
+          db
+            .select({ id: videoDeliveries.id })
+            .from(videoDeliveries)
+            .where(
+              and(
+                eq(videoDeliveries.videoId, videos.id),
+                eq(videoDeliveries.userId, userId),
               ),
-          ),
+            ),
         ),
-      )
-      .orderBy(asc(videos.sequence))
-      .limit(1);
+      ),
+    )
+    .orderBy(desc(videos.uploadedAt), desc(videos.id))
+    .limit(1);
 
-    return { video: video ?? null, isRepeat: false };
+  if (unseenVideo) {
+    return { video: unseenVideo, isRepeat: false };
   }
 
-  // Repeat mode: cycle through active videos based on how many deliveries the user already has.
+  // If user has seen all videos and repeat mode is disabled, no more videos
+  if (!repeatMode) {
+    return { video: null, isRepeat: false };
+  }
+
+  // 2. Repeat mode enabled: cycle through active videos in newest-first order
   const [totalActive, deliveredCount] = await Promise.all([
     countActiveVideos(),
     countDeliveredToUser(userId),
@@ -253,15 +260,15 @@ export async function getNextVideoForUser(userId: number): Promise<NextVideoResu
   if (totalActive === 0) return { video: null, isRepeat: false };
 
   const offset = deliveredCount % totalActive;
-  const [video] = await db
+  const [repeatVideo] = await db
     .select()
     .from(videos)
     .where(eq(videos.status, "active"))
-    .orderBy(asc(videos.sequence))
+    .orderBy(desc(videos.uploadedAt), desc(videos.id))
     .limit(1)
     .offset(offset);
 
-  return { video: video ?? null, isRepeat: deliveredCount >= totalActive };
+  return { video: repeatVideo ?? null, isRepeat: true };
 }
 
 export async function recordDelivery(userId: number, videoId: number): Promise<void> {
@@ -308,7 +315,7 @@ export async function listVideos(filters: VideoListFilters) {
     .select()
     .from(videos)
     .where(where)
-    .orderBy(desc(videos.sequence))
+    .orderBy(desc(videos.uploadedAt), desc(videos.id))
     .limit(pageSize)
     .offset((page - 1) * pageSize);
 

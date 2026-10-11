@@ -1,8 +1,9 @@
 import "dotenv/config";
 import { db } from "../src/db";
-import { videos } from "../src/db/schema";
-import { createVideo, findDuplicateVideo } from "../src/lib/services/videoService";
-import { eq } from "drizzle-orm";
+import { users, videos, videoDeliveries, settings } from "../src/db/schema";
+import { createVideo, findDuplicateVideo, getNextVideoForUser, recordDelivery } from "../src/lib/services/videoService";
+import { setSetting } from "../src/lib/services/settingsService";
+import { eq, inArray } from "drizzle-orm";
 
 let passed = 0;
 let failed = 0;
@@ -185,6 +186,177 @@ async function runTests() {
     };
     assert(videoOptions.protect_content === true, "SendVideoOptions supports protect_content: true");
     assert(videoOptions.has_spoiler === true, "SendVideoOptions supports has_spoiler: true");
+
+    // =========================================================================
+    // NEWEST-FIRST DELIVERY TESTS
+    // =========================================================================
+    console.log("\n=========================================");
+    console.log("🎬 Running Newest-First Video Delivery Tests");
+    console.log("=========================================\n");
+
+    const cleanUpVideoIds: number[] = [];
+    let testUserAId: number | null = null;
+    let testUserBId: number | null = null;
+
+    try {
+      // Create test users
+      const [userA] = await db.insert(users).values({
+        telegramId: 998000000 + Math.floor(Math.random() * 100000),
+        firstName: "Test User A",
+      }).returning();
+      testUserAId = userA.id;
+
+      const [userB] = await db.insert(users).values({
+        telegramId: 998100000 + Math.floor(Math.random() * 100000),
+        firstName: "Test User B",
+      }).returning();
+      testUserBId = userB.id;
+
+      // Mark any pre-existing database videos as delivered for test users
+      // so the controlled test videos represent the user's active unseen horizon.
+      const existingDbVideos = await db.select({ id: videos.id }).from(videos);
+      for (const row of existingDbVideos) {
+        await recordDelivery(userA.id, row.id);
+        await recordDelivery(userB.id, row.id);
+      }
+
+      // Create 3 videos with distinct uploadedAt times:
+      // V_old: 30 mins ago
+      // V_mid: 15 mins ago
+      // V_new: 1 min ago
+      const now = Date.now();
+      const vOldRes = await createVideo({
+        telegramFileId: `file_old_${now}`,
+        fileUniqueId: `uniq_old_${now}`,
+        caption: "V_old",
+        fileSize: 11000001,
+        durationSeconds: 10,
+        uploadedAt: new Date(now - 30 * 60 * 1000),
+      });
+      cleanUpVideoIds.push(vOldRes.video.id);
+
+      const vMidRes = await createVideo({
+        telegramFileId: `file_mid_${now}`,
+        fileUniqueId: `uniq_mid_${now}`,
+        caption: "V_mid",
+        fileSize: 11000002,
+        durationSeconds: 10,
+        uploadedAt: new Date(now - 15 * 60 * 1000),
+      });
+      cleanUpVideoIds.push(vMidRes.video.id);
+
+      const vNewRes = await createVideo({
+        telegramFileId: `file_new_${now}`,
+        fileUniqueId: `uniq_new_${now}`,
+        caption: "V_new",
+        fileSize: 11000003,
+        durationSeconds: 10,
+        uploadedAt: new Date(now - 1 * 60 * 1000),
+      });
+      cleanUpVideoIds.push(vNewRes.video.id);
+
+      // Test 10: New user receives latest video first
+      console.log("Test 10: New user receives latest video first (V_new)");
+      const firstDelivery = await getNextVideoForUser(userA.id);
+      assert(firstDelivery.video?.id === vNewRes.video.id, "New user receives V_new first");
+
+      // Test 11: Next button follows newest-first order
+      console.log("\nTest 11: Next button follows newest-first order (V_new -> V_mid -> V_old)");
+      await recordDelivery(userA.id, vNewRes.video.id);
+      const secondDelivery = await getNextVideoForUser(userA.id);
+      assert(secondDelivery.video?.id === vMidRes.video.id, "Second delivery is V_mid");
+
+      await recordDelivery(userA.id, vMidRes.video.id);
+      const thirdDelivery = await getNextVideoForUser(userA.id);
+      assert(thirdDelivery.video?.id === vOldRes.video.id, "Third delivery is V_old");
+
+      // Test 12: Existing user receives latest unseen video
+      console.log("\nTest 12: Existing user receives latest unseen video");
+      // Suppose User B already saw V_mid earlier
+      await recordDelivery(userB.id, vMidRes.video.id);
+      const userBDelivery = await getNextVideoForUser(userB.id);
+      assert(userBDelivery.video?.id === vNewRes.video.id, "User B prioritizes newest unseen video (V_new)");
+
+      // Test 13: New video uploaded during user session
+      console.log("\nTest 13: New video uploaded during user session is prioritized immediately");
+      // User A has watched V_new, V_mid, V_old.
+      await recordDelivery(userA.id, vOldRes.video.id);
+      // Now a brand new video V_latest is uploaded:
+      const vLatestRes = await createVideo({
+        telegramFileId: `file_latest_${now}`,
+        fileUniqueId: `uniq_latest_${now}`,
+        caption: "V_latest",
+        fileSize: 11000004,
+        durationSeconds: 10,
+        uploadedAt: new Date(now + 1000),
+      });
+      cleanUpVideoIds.push(vLatestRes.video.id);
+
+      const userANext = await getNextVideoForUser(userA.id);
+      assert(userANext.video?.id === vLatestRes.video.id, "User A immediately receives newly uploaded V_latest next");
+
+      // Test 14: Deterministic ordering for equal upload timestamps (id DESC tie-breaker)
+      console.log("\nTest 14: Equal upload timestamps tie-breaker (id DESC)");
+      const equalFutureTimestamp = new Date(now + 5000);
+      const vEq1 = await createVideo({
+        telegramFileId: `file_eq1_${now}`,
+        fileUniqueId: `uniq_eq1_${now}`,
+        caption: "V_eq1",
+        fileSize: 11000005,
+        durationSeconds: 10,
+        uploadedAt: equalFutureTimestamp,
+      });
+      cleanUpVideoIds.push(vEq1.video.id);
+
+      const vEq2 = await createVideo({
+        telegramFileId: `file_eq2_${now}`,
+        fileUniqueId: `uniq_eq2_${now}`,
+        caption: "V_eq2",
+        fileSize: 11000006,
+        durationSeconds: 10,
+        uploadedAt: equalFutureTimestamp,
+      });
+      cleanUpVideoIds.push(vEq2.video.id);
+
+      // Create user C to test tie-breaker
+      const [userC] = await db.insert(users).values({
+        telegramId: 998200000 + Math.floor(Math.random() * 100000),
+        firstName: "Test User C",
+      }).returning();
+      for (const row of existingDbVideos) {
+        await recordDelivery(userC.id, row.id);
+      }
+      const userCDelivery = await getNextVideoForUser(userC.id);
+      const expectedHigherId = Math.max(vEq1.video.id, vEq2.video.id);
+      assert(userCDelivery.video?.id === expectedHigherId, "Equal timestamps resolved deterministically by id DESC");
+      await db.delete(users).where(eq(users.id, userC.id));
+
+      // Test 15: Repeat mode ON vs OFF
+      console.log("\nTest 15: Repeat mode behavior (ON vs OFF)");
+      await recordDelivery(userA.id, vLatestRes.video.id);
+      await recordDelivery(userA.id, vEq1.video.id);
+      await recordDelivery(userA.id, vEq2.video.id);
+
+      // Set repeat mode OFF in settings
+      await setSetting("REPEAT_MODE", "false");
+      const repeatOffDelivery = await getNextVideoForUser(userA.id);
+      assert(repeatOffDelivery.video === null && repeatOffDelivery.isRepeat === false, "Repeat mode OFF returns null when all videos watched");
+
+      // Set repeat mode ON in settings
+      await setSetting("REPEAT_MODE", "true");
+      const repeatOnDelivery = await getNextVideoForUser(userA.id);
+      assert(repeatOnDelivery.video !== null && repeatOnDelivery.isRepeat === true, "Repeat mode ON cycles back with isRepeat: true");
+
+      // Reset repeat mode setting to false
+      await setSetting("REPEAT_MODE", "false");
+
+    } finally {
+      if (testUserAId) await db.delete(users).where(eq(users.id, testUserAId));
+      if (testUserBId) await db.delete(users).where(eq(users.id, testUserBId));
+      if (cleanUpVideoIds.length > 0) {
+        await db.delete(videos).where(inArray(videos.id, cleanUpVideoIds));
+      }
+    }
 
   } finally {
     // Cleanup the single test record

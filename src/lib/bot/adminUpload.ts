@@ -51,6 +51,7 @@ export async function handleAdminVideoMessage(message: TelegramMessage, adminLab
       width: "width" in media ? media.width ?? null : null,
       height: "height" in media ? media.height ?? null : null,
       addedBy: adminLabel,
+      uploadedAt: message.date ? new Date(message.date * 1000) : new Date(),
     });
 
     if (result.isDuplicate) {
@@ -157,6 +158,7 @@ export async function handleChannelPost(message: TelegramMessage): Promise<void>
       width: "width" in media ? media.width ?? null : null,
       height: "height" in media ? media.height ?? null : null,
       addedBy: `channel:${chat.title || chatId} (${message.message_id})`,
+      uploadedAt: message.date ? new Date(message.date * 1000) : new Date(),
     });
 
     if (result.isDuplicate) {

@@ -133,6 +133,7 @@ export const videos = pgTable("videos", {
   uniqueIndex("videos_channel_message_idx").on(table.channelId, table.channelMessageId),
   uniqueIndex("videos_content_hash_idx").on(table.contentHash),
   index("videos_fingerprint_idx").on(table.fileSize, table.durationSeconds),
+  index("videos_uploaded_at_idx").on(table.uploadedAt, table.id),
 ]);
 
 // ---------------------------------------------------------------------------
