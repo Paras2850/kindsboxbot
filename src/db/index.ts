@@ -20,7 +20,7 @@ export const pool =
         connectionString: currentUrl,
         max: 10,
         idleTimeoutMillis: 10_000, // close idle connections after 10s to avoid stale sockets across serverless pauses
-        connectionTimeoutMillis: 5_000, // 5s connection timeout
+        connectionTimeoutMillis: 15_000, // 15s connection timeout to allow Neon compute wakeups
       });
 
 pool.on("error", (err) => {

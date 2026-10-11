@@ -113,6 +113,9 @@ export const videos = pgTable("videos", {
   id: serial("id").primaryKey(),
   telegramFileId: text("telegram_file_id").notNull(),
   fileUniqueId: text("file_unique_id"),
+  channelId: varchar("channel_id", { length: 64 }),
+  channelMessageId: bigint("channel_message_id", { mode: "number" }),
+  contentHash: varchar("content_hash", { length: 64 }),
   caption: text("caption"),
   sequence: integer("sequence").notNull().default(0),
   status: varchar("status", { length: 16 }).notNull().default("active"), // active | disabled
@@ -120,10 +123,16 @@ export const videos = pgTable("videos", {
   deliveryCount: integer("delivery_count").notNull().default(0),
   fileSize: bigint("file_size", { mode: "number" }),
   durationSeconds: integer("duration_seconds"),
+  width: integer("width"),
+  height: integer("height"),
   addedBy: varchar("added_by", { length: 128 }),
 }, (table) => [
   index("videos_sequence_idx").on(table.sequence),
   index("videos_status_idx").on(table.status),
+  uniqueIndex("videos_file_unique_id_idx").on(table.fileUniqueId),
+  uniqueIndex("videos_channel_message_idx").on(table.channelId, table.channelMessageId),
+  uniqueIndex("videos_content_hash_idx").on(table.contentHash),
+  index("videos_fingerprint_idx").on(table.fileSize, table.durationSeconds),
 ]);
 
 // ---------------------------------------------------------------------------

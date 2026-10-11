@@ -105,6 +105,9 @@ async function migrate() {
         id SERIAL PRIMARY KEY,
         telegram_file_id TEXT NOT NULL,
         file_unique_id TEXT,
+        channel_id VARCHAR(64),
+        channel_message_id BIGINT,
+        content_hash VARCHAR(64),
         caption TEXT,
         sequence INTEGER NOT NULL DEFAULT 0,
         status VARCHAR(16) NOT NULL DEFAULT 'active',
@@ -112,10 +115,25 @@ async function migrate() {
         delivery_count INTEGER NOT NULL DEFAULT 0,
         file_size BIGINT,
         duration_seconds INTEGER,
+        width INTEGER,
+        height INTEGER,
         added_by VARCHAR(128)
       );
       CREATE INDEX IF NOT EXISTS videos_sequence_idx ON videos(sequence);
       CREATE INDEX IF NOT EXISTS videos_status_idx ON videos(status);
+
+      -- Incremental schema migrations for duplicate prevention
+      ALTER TABLE videos ADD COLUMN IF NOT EXISTS channel_id VARCHAR(64);
+      ALTER TABLE videos ADD COLUMN IF NOT EXISTS channel_message_id BIGINT;
+      ALTER TABLE videos ADD COLUMN IF NOT EXISTS content_hash VARCHAR(64);
+      ALTER TABLE videos ADD COLUMN IF NOT EXISTS width INTEGER;
+      ALTER TABLE videos ADD COLUMN IF NOT EXISTS height INTEGER;
+
+      -- Unique indexes to prevent race-condition duplicates
+      CREATE UNIQUE INDEX IF NOT EXISTS videos_file_unique_id_idx ON videos (file_unique_id) WHERE file_unique_id IS NOT NULL;
+      CREATE UNIQUE INDEX IF NOT EXISTS videos_channel_msg_idx ON videos (channel_id, channel_message_id) WHERE channel_id IS NOT NULL AND channel_message_id IS NOT NULL;
+      CREATE UNIQUE INDEX IF NOT EXISTS videos_content_hash_idx ON videos (content_hash) WHERE content_hash IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS videos_fingerprint_idx ON videos (file_size, duration_seconds) WHERE file_size IS NOT NULL AND duration_seconds IS NOT NULL;
     `);
 
     // 8. Video Deliveries

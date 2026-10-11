@@ -2,6 +2,7 @@ import { sendMessage } from "@/lib/telegram/client";
 import { createVideo } from "@/lib/services/videoService";
 import { getSetting } from "@/lib/services/settingsService";
 import { scheduleNewVideoNotification } from "@/lib/services/notificationService";
+import { logAudit } from "@/lib/services/auditService";
 import type { TelegramDocument, TelegramMessage, TelegramVideo } from "@/lib/telegram/types";
 
 const VIDEO_MIME_PREFIXES = ["video/"];
@@ -33,15 +34,36 @@ export async function handleAdminVideoMessage(message: TelegramMessage, adminLab
   }
 
   try {
-    const video = await createVideo({
+    const result = await createVideo({
       telegramFileId: media.file_id,
       fileUniqueId: media.file_unique_id,
       caption: message.caption ?? null,
       fileSize: media.file_size ?? null,
       durationSeconds: "duration" in media ? media.duration ?? null : null,
+      width: "width" in media ? media.width ?? null : null,
+      height: "height" in media ? media.height ?? null : null,
       addedBy: adminLabel,
     });
 
+    if (result.isDuplicate) {
+      console.log(
+        `[admin-upload] ⚠️ Duplicate video skipped (reason: ${result.duplicateReason}). Existing Video ID: ${result.video.id}`,
+      );
+      await logAudit(null, "video.duplicate_skipped", {
+        reason: result.duplicateReason,
+        existingVideoId: result.video.id,
+        addedBy: adminLabel,
+        fileUniqueId: media.file_unique_id ?? null,
+      });
+
+      await sendMessage(
+        chatId,
+        `⚠️ <b>Duplicate Video Detected</b>\n\nThis video is already in your library:\n#️⃣ Existing ID: <b>${result.video.id}</b>\n🔢 Sequence: <b>${result.video.sequence}</b>\n🔍 Match reason: <code>${result.duplicateReason || "duplicate"}</code>\n\n<i>Import skipped — subscribers will not receive duplicate content.</i>`,
+      );
+      return;
+    }
+
+    const { video } = result;
     await sendMessage(
       chatId,
       `✅ Video saved.\n\n#️⃣ ID: ${video.id}\n🔢 Sequence: ${video.sequence}\n📝 Caption: ${video.caption || "(none)"}`,
@@ -108,15 +130,36 @@ export async function handleChannelPost(message: TelegramMessage): Promise<void>
   }
 
   try {
-    const video = await createVideo({
+    const result = await createVideo({
       telegramFileId: media.file_id,
       fileUniqueId: media.file_unique_id,
+      channelId: String(chatId),
+      channelMessageId: message.message_id,
       caption: message.caption ?? null,
       fileSize: media.file_size ?? null,
       durationSeconds: "duration" in media ? media.duration ?? null : null,
+      width: "width" in media ? media.width ?? null : null,
+      height: "height" in media ? media.height ?? null : null,
       addedBy: `channel:${chat.title || chatId} (${message.message_id})`,
     });
 
+    if (result.isDuplicate) {
+      console.log(
+        `[channel_post] ⚠️ Duplicate video skipped (reason: ${result.duplicateReason}). Existing Video ID: ${result.video.id}, Channel: ${chatId}, Post ID: ${message.message_id}`,
+      );
+      await logAudit(null, "video.duplicate_skipped", {
+        reason: result.duplicateReason,
+        existingVideoId: result.video.id,
+        channelId: String(chatId),
+        messageId: message.message_id,
+        fileUniqueId: media.file_unique_id ?? null,
+        fileSize: media.file_size ?? null,
+        duration: "duration" in media ? media.duration ?? null : null,
+      });
+      return; // Do NOT broadcast notification to subscribers for duplicate videos!
+    }
+
+    const { video } = result;
     console.log(
       `[channel_post] ✅ Auto-imported video id=${video.id} seq=${video.sequence} from channel=${chatId} (file_unique_id=${media.file_unique_id})`,
     );

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import crypto from "crypto";
 import { sendVideoFile, deleteMessage } from "@/lib/telegram/client";
 import { createVideo } from "@/lib/services/videoService";
 import { getSetting } from "@/lib/services/settingsService";
@@ -59,6 +60,10 @@ export async function POST(req: NextRequest) {
         continue;
       }
 
+      // Compute SHA-256 content hash directly from raw uploaded bytes
+      const fileBytes = Buffer.from(await file.arrayBuffer());
+      const contentHash = crypto.createHash("sha256").update(fileBytes).digest("hex");
+
       const sent = await sendVideoFile(storageChatId, file, file.name, caption || undefined);
       if (!sent || !sent.video?.file_id) {
         results.push({ fileName: file.name, success: false, error: "Telegram did not return a valid video file_id" });
@@ -71,16 +76,35 @@ export async function POST(req: NextRequest) {
         await deleteMessage(storageChatId, sent.message_id).catch(() => {});
       }
 
-      const video = await createVideo({
+      const result = await createVideo({
         telegramFileId: sent.video.file_id,
         fileUniqueId: sent.video.file_unique_id,
+        contentHash,
         caption: caption || null,
         fileSize: sent.video.file_size ?? file.size,
         durationSeconds: sent.video.duration ?? null,
+        width: (sent.video as any)?.width ?? null,
+        height: (sent.video as any)?.height ?? null,
         addedBy: session ? `admin:${session.username}` : "admin-panel",
       });
 
-      results.push({ fileName: file.name, success: true, videoId: video.id });
+      if (result.isDuplicate) {
+        await logAudit(session?.adminId ?? null, "video.duplicate_skipped", {
+          reason: result.duplicateReason,
+          existingVideoId: result.video.id,
+          fileName: file.name,
+          contentHash,
+        });
+
+        results.push({
+          fileName: file.name,
+          success: false,
+          error: `Duplicate video skipped: already exists as Video #${result.video.id} (matched by ${result.duplicateReason})`,
+        });
+        continue;
+      }
+
+      results.push({ fileName: file.name, success: true, videoId: result.video.id });
     } catch (err) {
       let errMsg = err instanceof Error ? err.message : "Upload error";
       if (errMsg.toLowerCase().includes("chat not found")) {
