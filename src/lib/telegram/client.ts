@@ -64,16 +64,21 @@ export interface SendMessageOptions {
   reply_markup?: InlineKeyboardMarkup;
   parse_mode?: "HTML" | "Markdown";
   disable_web_page_preview?: boolean;
+  protect_content?: boolean;
 }
 
 export async function sendMessage(chatId: number | string, text: string, options: SendMessageOptions = {}) {
-  return callApi("sendMessage", {
+  const payload: Record<string, unknown> = {
     chat_id: chatId,
     text,
     parse_mode: options.parse_mode ?? "HTML",
     disable_web_page_preview: options.disable_web_page_preview ?? true,
     reply_markup: options.reply_markup,
-  });
+  };
+  if (typeof options.protect_content === "boolean") {
+    payload.protect_content = options.protect_content;
+  }
+  return callApi("sendMessage", payload);
 }
 
 export interface VideoResult {
@@ -84,6 +89,7 @@ export interface VideoResult {
 export interface SendVideoOptions extends SendMessageOptions {
   has_spoiler?: boolean;
   supports_streaming?: boolean;
+  protect_content?: boolean;
 }
 
 export async function sendVideoByFileId(
@@ -102,6 +108,9 @@ export async function sendVideoByFileId(
   if (caption) payload.caption = caption;
   if (typeof options.has_spoiler === "boolean") {
     payload.has_spoiler = options.has_spoiler;
+  }
+  if (typeof options.protect_content === "boolean") {
+    payload.protect_content = options.protect_content;
   }
   return callApi<VideoResult>("sendVideo", payload);
 }

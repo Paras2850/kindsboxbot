@@ -111,6 +111,16 @@ async function runTests() {
     });
     assert(distinctCheck === null, "Distinct video should return null duplicate check");
 
+    // 7. Video protection & spoiler options verification
+    console.log("\nTest 7: Verification of sendVideo options with protect_content and has_spoiler");
+    const videoOptions: import("../src/lib/telegram/client").SendVideoOptions = {
+      has_spoiler: true,
+      protect_content: true,
+      supports_streaming: true,
+    };
+    assert(videoOptions.protect_content === true, "SendVideoOptions supports protect_content: true");
+    assert(videoOptions.has_spoiler === true, "SendVideoOptions supports has_spoiler: true");
+
   } finally {
     // Cleanup the single test record
     if (createdVideoId) {

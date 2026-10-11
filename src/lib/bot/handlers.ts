@@ -127,20 +127,29 @@ export async function handleVideoRequest(chatId: number, user: User) {
     video.caption ||
     captionTemplate.replace("{sequence}", String(video.sequence));
 
-  const sent = await sendVideoByFileId(chatId, video.telegramFileId, caption, {
-    reply_markup: videoPlaybackKeyboard(),
-    has_spoiler: true,
-  });
-
-  if (sent) {
-    // Record delivery in background without blocking response
-    recordDelivery(user.id, video.id).catch((err) => {
-      console.error("[bot] failed to record video delivery", err);
+  try {
+    const sent = await sendVideoByFileId(chatId, video.telegramFileId, caption, {
+      reply_markup: videoPlaybackKeyboard(),
+      has_spoiler: true,
+      protect_content: true,
     });
-  } else {
+
+    if (sent) {
+      // Record delivery in background without blocking response
+      recordDelivery(user.id, video.id).catch((err) => {
+        console.error("[bot] failed to record video delivery", err);
+      });
+    } else {
+      await sendMessage(
+        chatId,
+        "⚠️ Sorry, we couldn't deliver the video right now. Please try again with /video in a moment.",
+      );
+    }
+  } catch (err) {
+    console.error("[bot] video delivery error:", err instanceof Error ? err.message : err);
     await sendMessage(
       chatId,
-      "⚠️ Sorry, we couldn't deliver the video right now. Please try again with /video in a moment.",
+      "⚠️ Sorry, an error occurred while delivering your video. Please try again with /video in a moment.",
     );
   }
 }
