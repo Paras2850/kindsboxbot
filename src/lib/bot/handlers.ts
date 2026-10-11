@@ -129,6 +129,7 @@ export async function handleVideoRequest(chatId: number, user: User) {
 
   const sent = await sendVideoByFileId(chatId, video.telegramFileId, caption, {
     reply_markup: videoPlaybackKeyboard(),
+    has_spoiler: true,
   });
 
   if (sent) {

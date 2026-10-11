@@ -81,19 +81,29 @@ export interface VideoResult {
   video?: { file_id: string; file_unique_id: string; duration?: number; file_size?: number };
 }
 
+export interface SendVideoOptions extends SendMessageOptions {
+  has_spoiler?: boolean;
+  supports_streaming?: boolean;
+}
+
 export async function sendVideoByFileId(
   chatId: number | string,
   fileId: string,
   caption?: string,
-  options: SendMessageOptions = {},
+  options: SendVideoOptions = {},
 ) {
-  return callApi<VideoResult>("sendVideo", {
+  const payload: Record<string, unknown> = {
     chat_id: chatId,
     video: fileId,
-    caption,
     parse_mode: options.parse_mode ?? "HTML",
     reply_markup: options.reply_markup,
-  });
+    supports_streaming: options.supports_streaming ?? true,
+  };
+  if (caption) payload.caption = caption;
+  if (typeof options.has_spoiler === "boolean") {
+    payload.has_spoiler = options.has_spoiler;
+  }
+  return callApi<VideoResult>("sendVideo", payload);
 }
 
 export async function sendVideoFile(
