@@ -5,8 +5,8 @@ import { isRepeatMode } from "@/lib/services/settingsService";
 
 export type Video = typeof videos.$inferSelect;
 
-export async function getNextSequence(): Promise<number> {
-  const [row] = await db.select({ max: max(videos.sequence) }).from(videos);
+export async function getNextSequence(dbOrTx: typeof db | any = db): Promise<number> {
+  const [row] = await dbOrTx.select({ max: max(videos.sequence) }).from(videos);
   return (row?.max ?? 0) + 1;
 }
 
@@ -36,18 +36,23 @@ export interface CreateVideoResult {
     | "concurrent_conflict";
 }
 
-export async function findDuplicateVideo(input: {
-  channelId?: string | null;
-  channelMessageId?: number | null;
-  fileUniqueId?: string | null;
-  contentHash?: string | null;
-  telegramFileId?: string | null;
-  fileSize?: number | null;
-  durationSeconds?: number | null;
-}): Promise<{ existing: Video; reason: CreateVideoResult["duplicateReason"] } | null> {
+export async function findDuplicateVideo(
+  input: {
+    channelId?: string | null;
+    channelMessageId?: number | null;
+    fileUniqueId?: string | null;
+    contentHash?: string | null;
+    telegramFileId?: string | null;
+    fileSize?: number | null;
+    durationSeconds?: number | null;
+    width?: number | null;
+    height?: number | null;
+  },
+  dbOrTx: typeof db | any = db,
+): Promise<{ existing: Video; reason: CreateVideoResult["duplicateReason"] } | null> {
   // 1. Check exact channel post message
   if (input.channelId && typeof input.channelMessageId === "number") {
-    const [existing] = await db
+    const [existing] = await dbOrTx
       .select()
       .from(videos)
       .where(
@@ -64,7 +69,7 @@ export async function findDuplicateVideo(input: {
 
   // 2. Check Telegram file_unique_id
   if (input.fileUniqueId) {
-    const [existing] = await db
+    const [existing] = await dbOrTx
       .select()
       .from(videos)
       .where(eq(videos.fileUniqueId, input.fileUniqueId))
@@ -76,7 +81,7 @@ export async function findDuplicateVideo(input: {
 
   // 3. Check SHA-256 content hash (when raw bytes were hashed)
   if (input.contentHash) {
-    const [existing] = await db
+    const [existing] = await dbOrTx
       .select()
       .from(videos)
       .where(eq(videos.contentHash, input.contentHash))
@@ -88,7 +93,7 @@ export async function findDuplicateVideo(input: {
 
   // 4. Check Telegram file_id
   if (input.telegramFileId) {
-    const [existing] = await db
+    const [existing] = await dbOrTx
       .select()
       .from(videos)
       .where(eq(videos.telegramFileId, input.telegramFileId))
@@ -98,26 +103,45 @@ export async function findDuplicateVideo(input: {
     }
   }
 
-  // 5. Content fingerprint: exact byte size + duration match
+  // 5. Content fingerprint: match on exact byte size + duration/dimensions
   // Protects against re-uploading the identical video under a different Telegram message or unique_id
-  if (
-    typeof input.fileSize === "number" &&
-    input.fileSize > 0 &&
-    typeof input.durationSeconds === "number" &&
-    input.durationSeconds > 0
-  ) {
-    const [existing] = await db
+  if (typeof input.fileSize === "number" && input.fileSize > 0) {
+    const candidates = await dbOrTx
       .select()
       .from(videos)
-      .where(
-        and(
-          eq(videos.fileSize, input.fileSize),
-          eq(videos.durationSeconds, input.durationSeconds),
-        ),
-      )
-      .limit(1);
-    if (existing) {
-      return { existing, reason: "content_fingerprint" };
+      .where(eq(videos.fileSize, input.fileSize));
+
+    for (const existing of candidates) {
+      // Both have duration > 0: match if duration is within 1s tolerance
+      if (
+        typeof input.durationSeconds === "number" &&
+        input.durationSeconds > 0 &&
+        typeof existing.durationSeconds === "number" &&
+        existing.durationSeconds > 0
+      ) {
+        if (Math.abs(existing.durationSeconds - input.durationSeconds) <= 1) {
+          return { existing, reason: "content_fingerprint" };
+        }
+      } else if (
+        // One or both lack duration or duration is 0 (e.g. document vs video upload)
+        (input.durationSeconds == null || input.durationSeconds === 0) ||
+        (existing.durationSeconds == null || existing.durationSeconds === 0)
+      ) {
+        // If both specify width and height, they must match
+        if (
+          input.width &&
+          input.height &&
+          existing.width &&
+          existing.height
+        ) {
+          if (input.width === existing.width && input.height === existing.height) {
+            return { existing, reason: "content_fingerprint" };
+          }
+        } else {
+          // Identical byte size down to the single byte
+          return { existing, reason: "content_fingerprint" };
+        }
+      }
     }
   }
 
@@ -125,53 +149,64 @@ export async function findDuplicateVideo(input: {
 }
 
 export async function createVideo(input: CreateVideoInput): Promise<CreateVideoResult> {
-  const duplicate = await findDuplicateVideo(input);
-  if (duplicate) {
-    return {
-      video: duplicate.existing,
-      isDuplicate: true,
-      duplicateReason: duplicate.reason,
-    };
-  }
+  const lockKey = input.fileSize
+    ? `video_size_${input.fileSize}`
+    : input.fileUniqueId
+      ? `video_uniq_${input.fileUniqueId}`
+      : `video_msg_${input.channelId || ""}_${input.channelMessageId || ""}`;
 
-  const sequence = await getNextSequence();
-  try {
-    const [video] = await db
-      .insert(videos)
-      .values({
-        telegramFileId: input.telegramFileId,
-        fileUniqueId: input.fileUniqueId ?? null,
-        channelId: input.channelId ?? null,
-        channelMessageId: input.channelMessageId ?? null,
-        contentHash: input.contentHash ?? null,
-        caption: input.caption ?? null,
-        sequence,
-        fileSize: input.fileSize ?? null,
-        durationSeconds: input.durationSeconds ?? null,
-        width: input.width ?? null,
-        height: input.height ?? null,
-        addedBy: input.addedBy ?? null,
-      })
-      .returning();
+  return await db.transaction(async (tx) => {
+    // Acquire transaction-scoped advisory lock in Postgres to serialize concurrent imports
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`);
 
-    return {
-      video,
-      isDuplicate: false,
-    };
-  } catch (err: any) {
-    // 23505 is PostgreSQL unique_violation code - handles concurrent race conditions safely
-    if (err?.code === "23505") {
-      const raceDuplicate = await findDuplicateVideo(input);
-      if (raceDuplicate) {
-        return {
-          video: raceDuplicate.existing,
-          isDuplicate: true,
-          duplicateReason: "concurrent_conflict",
-        };
-      }
+    const duplicate = await findDuplicateVideo(input, tx);
+    if (duplicate) {
+      return {
+        video: duplicate.existing,
+        isDuplicate: true,
+        duplicateReason: duplicate.reason,
+      };
     }
-    throw err;
-  }
+
+    const sequence = await getNextSequence(tx);
+    try {
+      const [video] = await tx
+        .insert(videos)
+        .values({
+          telegramFileId: input.telegramFileId,
+          fileUniqueId: input.fileUniqueId ?? null,
+          channelId: input.channelId ?? null,
+          channelMessageId: input.channelMessageId ?? null,
+          contentHash: input.contentHash ?? null,
+          caption: input.caption ?? null,
+          sequence,
+          fileSize: input.fileSize ?? null,
+          durationSeconds: input.durationSeconds ?? null,
+          width: input.width ?? null,
+          height: input.height ?? null,
+          addedBy: input.addedBy ?? null,
+        })
+        .returning();
+
+      return {
+        video,
+        isDuplicate: false,
+      };
+    } catch (err: any) {
+      // 23505 is PostgreSQL unique_violation code - handles concurrent race conditions safely
+      if (err?.code === "23505") {
+        const raceDuplicate = await findDuplicateVideo(input, tx);
+        if (raceDuplicate) {
+          return {
+            video: raceDuplicate.existing,
+            isDuplicate: true,
+            duplicateReason: "concurrent_conflict",
+          };
+        }
+      }
+      throw err;
+    }
+  });
 }
 
 export interface NextVideoResult {

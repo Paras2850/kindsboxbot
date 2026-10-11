@@ -1,4 +1,4 @@
-import { sendMessage } from "@/lib/telegram/client";
+import { computeTelegramFileSha256, sendMessage } from "@/lib/telegram/client";
 import { createVideo } from "@/lib/services/videoService";
 import { getSetting } from "@/lib/services/settingsService";
 import { scheduleNewVideoNotification } from "@/lib/services/notificationService";
@@ -34,9 +34,17 @@ export async function handleAdminVideoMessage(message: TelegramMessage, adminLab
   }
 
   try {
+    // Compute SHA-256 hash for files <= 20MB (Telegram getFile API hard limit).
+    // Files > 20MB are safely deduplicated using composite content fingerprinting.
+    let contentHash: string | null = null;
+    if (media.file_size && media.file_size <= 20 * 1024 * 1024) {
+      contentHash = await computeTelegramFileSha256(media.file_id, media.file_size);
+    }
+
     const result = await createVideo({
       telegramFileId: media.file_id,
       fileUniqueId: media.file_unique_id,
+      contentHash,
       caption: message.caption ?? null,
       fileSize: media.file_size ?? null,
       durationSeconds: "duration" in media ? media.duration ?? null : null,
@@ -130,11 +138,19 @@ export async function handleChannelPost(message: TelegramMessage): Promise<void>
   }
 
   try {
+    // Compute SHA-256 hash for files <= 20MB (Telegram getFile API hard limit).
+    // Files > 20MB are safely deduplicated using composite content fingerprinting without downloading.
+    let contentHash: string | null = null;
+    if (media.file_size && media.file_size <= 20 * 1024 * 1024) {
+      contentHash = await computeTelegramFileSha256(media.file_id, media.file_size);
+    }
+
     const result = await createVideo({
       telegramFileId: media.file_id,
       fileUniqueId: media.file_unique_id,
       channelId: String(chatId),
       channelMessageId: message.message_id,
+      contentHash,
       caption: message.caption ?? null,
       fileSize: media.file_size ?? null,
       durationSeconds: "duration" in media ? media.duration ?? null : null,

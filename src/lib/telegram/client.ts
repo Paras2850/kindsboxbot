@@ -1,4 +1,5 @@
 import { env, isBotConfigured } from "@/lib/env";
+import crypto from "crypto";
 
 const API_BASE = "https://api.telegram.org";
 
@@ -201,4 +202,65 @@ export async function editMessageReplyMarkup(
     message_id: messageId,
     reply_markup: replyMarkup,
   });
+}
+
+export interface TelegramFileInfo {
+  file_id: string;
+  file_unique_id: string;
+  file_size?: number;
+  file_path?: string;
+}
+
+export async function getFile(fileId: string): Promise<TelegramFileInfo | null> {
+  return callApi<TelegramFileInfo>("getFile", { file_id: fileId });
+}
+
+/**
+ * Computes SHA-256 hash for small Telegram files (<= 20MB).
+ * Returns null if the file exceeds maxBytes (to avoid Telegram API errors and Vercel timeouts)
+ * or if getFile fails.
+ */
+export async function computeTelegramFileSha256(
+  fileId: string,
+  fileSize?: number | null,
+  maxBytes = 20 * 1024 * 1024,
+): Promise<string | null> {
+  if (typeof fileSize === "number" && fileSize > maxBytes) {
+    return null;
+  }
+  if (!isBotConfigured()) return null;
+
+  try {
+    const fileInfo = await getFile(fileId);
+    if (!fileInfo || !fileInfo.file_path) return null;
+    if (fileInfo.file_size && fileInfo.file_size > maxBytes) {
+      return null;
+    }
+
+    const fileUrl = `${API_BASE}/file/bot${env.botToken}/${fileInfo.file_path}`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+
+    try {
+      const res = await fetch(fileUrl, { signal: controller.signal });
+      if (!res.ok || !res.body) return null;
+
+      const hash = crypto.createHash("sha256");
+      const reader = res.body.getReader();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (value) hash.update(value);
+      }
+      return hash.digest("hex");
+    } finally {
+      clearTimeout(timer);
+    }
+  } catch (err) {
+    console.warn(
+      "[telegram] computeTelegramFileSha256 skipped or timed out:",
+      err instanceof Error ? err.message : err,
+    );
+    return null;
+  }
 }

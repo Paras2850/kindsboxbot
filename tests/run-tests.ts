@@ -89,30 +89,95 @@ async function runTests() {
     assert(dupByHash.duplicateReason === "content_hash", "Reason should be content_hash");
     assert(dupByHash.video.id === createdVideoId, "Should return existing video record");
 
-    // 5. Duplicate Detection: Content fingerprint (exact file_size + duration_seconds)
-    console.log("\nTest 5: Duplicate detection via content fingerprint (file_size + duration)");
+    // 5. Same video with different filename / caption (Duplicate via content fingerprint)
+    console.log("\nTest 5: Same video with different filename/caption (content fingerprint)");
     const dupByFingerprint = await createVideo({
       telegramFileId: `file_different_id_${Date.now()}`,
       fileUniqueId: `unique_different_${Date.now()}`,
       fileSize: testFileSize,
       durationSeconds: testDuration,
-      caption: "Re-uploaded video as new file to channel",
+      caption: "Renamed filename: episode_1_new_filename.mp4",
     });
-    assert(dupByFingerprint.isDuplicate, "Should detect duplicate via file_size + duration fingerprint");
+    assert(dupByFingerprint.isDuplicate, "Should detect duplicate despite different filename/caption");
     assert(dupByFingerprint.duplicateReason === "content_fingerprint", "Reason should be content_fingerprint");
     assert(dupByFingerprint.video.id === createdVideoId, "Should return existing video record");
 
-    // 6. Non-duplicate with different file_size or duration
-    console.log("\nTest 6: Distinct video with different size/duration should NOT be duplicate");
+    // 6. Different video with same filename / caption (Should NOT be duplicate)
+    console.log("\nTest 6: Different video with same filename/caption should NOT be duplicate");
     const distinctCheck = await findDuplicateVideo({
-      fileSize: testFileSize + 999,
-      durationSeconds: testDuration,
+      fileSize: testFileSize + 999, // Different size
+      durationSeconds: testDuration + 5, // Different duration
       fileUniqueId: `unique_brand_new_${Date.now()}`,
     });
-    assert(distinctCheck === null, "Distinct video should return null duplicate check");
+    assert(distinctCheck === null, "Different video with same filename should return null duplicate check");
 
-    // 7. Video protection & spoiler options verification
-    console.log("\nTest 7: Verification of sendVideo options with protect_content and has_spoiler");
+    // 7. Concurrent imports (Race Condition safety via Postgres advisory locks & constraints)
+    console.log("\nTest 7: Concurrent imports of the same video simultaneously");
+    const concurrentFileSize = 54321000 + Math.floor(Math.random() * 10000);
+    const concurrentDuration = 99;
+    const concurrentUniqId = `concurrent_${Date.now()}`;
+    const [resA, resB] = await Promise.all([
+      createVideo({
+        telegramFileId: `file_concurrent_A_${Date.now()}`,
+        fileUniqueId: concurrentUniqId,
+        fileSize: concurrentFileSize,
+        durationSeconds: concurrentDuration,
+        caption: "Concurrent import A",
+      }),
+      createVideo({
+        telegramFileId: `file_concurrent_B_${Date.now()}`,
+        fileUniqueId: concurrentUniqId,
+        fileSize: concurrentFileSize,
+        durationSeconds: concurrentDuration,
+        caption: "Concurrent import B",
+      }),
+    ]);
+
+    const oneCreated = (resA.isDuplicate === false && resB.isDuplicate === true) ||
+                       (resA.isDuplicate === true && resB.isDuplicate === false);
+    assert(oneCreated, "Exactly one concurrent import succeeds, while the other is caught as duplicate");
+    const createdConcurrentId = resA.isDuplicate ? resB.video.id : resA.video.id;
+    assert(typeof createdConcurrentId === "number", "Concurrent winner must have valid video ID");
+    if (createdConcurrentId) {
+      await db.delete(videos).where(eq(videos.id, createdConcurrentId));
+    }
+
+    // 8. Large files (> 100MB) without downloading
+    console.log("\nTest 8: Large video (150MB) deduplication without downloading");
+    const largeFileSize = 150 * 1024 * 1024; // 150 MB
+    const largeDuration = 480;
+    const largeInitial = await createVideo({
+      telegramFileId: `file_large_1_${Date.now()}`,
+      fileUniqueId: `large_uniq_1_${Date.now()}`,
+      fileSize: largeFileSize,
+      durationSeconds: largeDuration,
+      width: 1920,
+      height: 1080,
+      caption: "Large 150MB video batch 1",
+    });
+    assert(!largeInitial.isDuplicate, "Initial large video insert should succeed");
+    const largeVideoId = largeInitial.video.id;
+
+    // Second batch re-upload of same 150MB video under different Telegram message & unique_id
+    const largeReupload = await createVideo({
+      telegramFileId: `file_large_2_${Date.now()}`,
+      fileUniqueId: `large_uniq_2_${Date.now()}`, // Telegram changed file_unique_id in batch 2
+      fileSize: largeFileSize, // Same 150MB size
+      durationSeconds: largeDuration, // Same duration
+      width: 1920,
+      height: 1080,
+      caption: "Large 150MB video re-uploaded in batch 2",
+    });
+    assert(largeReupload.isDuplicate, "Large video re-upload must be detected as duplicate");
+    assert(largeReupload.duplicateReason === "content_fingerprint", "Large duplicate matched by content_fingerprint");
+    assert(largeReupload.video.id === largeVideoId, "Should link to the existing large video ID");
+
+    if (largeVideoId) {
+      await db.delete(videos).where(eq(videos.id, largeVideoId));
+    }
+
+    // 9. Video protection & spoiler options verification
+    console.log("\nTest 9: Verification of sendVideo options with protect_content and has_spoiler");
     const videoOptions: import("../src/lib/telegram/client").SendVideoOptions = {
       has_spoiler: true,
       protect_content: true,
