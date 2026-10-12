@@ -270,7 +270,7 @@ export async function getNextVideoForUser(
 
   if (totalActive === 0) return { video: null, isRepeat: false };
 
-  const offset = deliveredCount % totalActive;
+  const offset = Math.max(0, Math.floor(Number(deliveredCount) % Math.max(1, Number(totalActive))));
   const repeatConditions = [eq(videos.status, "active")];
   if (options?.excludeVideoIds && options.excludeVideoIds.length > 0) {
     repeatConditions.push(notInArray(videos.id, options.excludeVideoIds));
@@ -299,12 +299,12 @@ export async function recordDelivery(userId: number, videoId: number): Promise<v
 
 export async function countDeliveredToUser(userId: number): Promise<number> {
   const [row] = await db.select({ c: count() }).from(videoDeliveries).where(eq(videoDeliveries.userId, userId));
-  return row?.c ?? 0;
+  return Number(row?.c ?? 0);
 }
 
 export async function countActiveVideos(): Promise<number> {
   const [row] = await db.select({ c: count() }).from(videos).where(eq(videos.status, "active"));
-  return row?.c ?? 0;
+  return Number(row?.c ?? 0);
 }
 
 export interface VideoListFilters {

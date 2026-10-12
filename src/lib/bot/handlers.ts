@@ -89,79 +89,94 @@ export async function sendMyAccount(chatId: number, user: User) {
 const inFlightUsers = new Set<number>();
 
 export async function handleVideoRequest(chatId: number, user: User) {
-  // Prevent duplicate concurrent dispatches for the same user (e.g. rapid double-clicking Next Video)
-  if (inFlightUsers.has(user.id)) {
-    return;
-  }
-
-  const rate = checkRateLimit(`video:${user.telegramId}`, 1, 3000);
-  if (!rate.allowed) {
-    await sendMessage(chatId, "⏳ Please wait a few seconds before requesting another video.");
-    return;
-  }
-  const hourly = checkRateLimit(`video-hourly:${user.telegramId}`, 60, 60 * 60 * 1000);
-  if (!hourly.allowed) {
-    await sendMessage(chatId, "⏳ You've reached the hourly video limit. Please try again later.");
-    return;
-  }
-
-  const isFree = await isFreeMode();
-  if (!isFree) {
-    const sub = await getCurrentSubscription(user.id);
-    const isActive = Boolean(sub && sub.status === "active" && sub.expiresAt.getTime() > Date.now());
-    if (!isActive) {
-      const expiredMessage = await getSetting("EXPIRED_MESSAGE");
-      const header = sub ? expiredMessage : "💎 You don't have an active subscription yet.\n\nChoose a plan to get started:";
-      await sendPlans(chatId, header);
-      return;
-    }
-  }
-
-  inFlightUsers.add(user.id);
   try {
-    // Send instant visual feedback to user in Telegram while video is fetched/dispatched
-    sendChatAction(chatId, "upload_video").catch(() => {});
-
-    const [{ video }, captionTemplate] = await Promise.all([
-      getNextVideoForUser(user.id),
-      getSetting("VIDEO_CAPTION_TEMPLATE"),
-    ]);
-
-    if (!video) {
-      await sendMessage(chatId, WATCHED_ALL_TEXT, { reply_markup: backToMenuKeyboard() });
+    // Prevent duplicate concurrent dispatches for the same user (e.g. rapid double-clicking Next Video)
+    if (inFlightUsers.has(user.id)) {
       return;
     }
 
-    const caption =
-      video.caption ||
-      captionTemplate.replace("{sequence}", String(video.sequence));
+    const rate = checkRateLimit(`video:${user.telegramId}`, 1, 3000);
+    if (!rate.allowed) {
+      await sendMessage(chatId, "⏳ Please wait a few seconds before requesting another video.");
+      return;
+    }
+    const hourly = checkRateLimit(`video-hourly:${user.telegramId}`, 60, 60 * 60 * 1000);
+    if (!hourly.allowed) {
+      await sendMessage(chatId, "⏳ You've reached the hourly video limit. Please try again later.");
+      return;
+    }
 
+    const isFree = await isFreeMode();
+    if (!isFree) {
+      const sub = await getCurrentSubscription(user.id);
+      const isActive = Boolean(sub && sub.status === "active" && sub.expiresAt.getTime() > Date.now());
+      if (!isActive) {
+        const expiredMessage = await getSetting("EXPIRED_MESSAGE");
+        const header = sub ? expiredMessage : "💎 You don't have an active subscription yet.\n\nChoose a plan to get started:";
+        await sendPlans(chatId, header);
+        return;
+      }
+    }
+
+    inFlightUsers.add(user.id);
     try {
-      const sent = await sendVideoByFileId(chatId, video.telegramFileId, caption, {
-        reply_markup: videoPlaybackKeyboard(),
-        has_spoiler: true,
-        protect_content: true,
-      });
+      // Send instant visual feedback to user in Telegram while video is fetched/dispatched
+      sendChatAction(chatId, "upload_video").catch(() => {});
 
-      if (sent) {
-        // Await delivery record so PostgreSQL immediately persists the delivery
-        // before any subsequent request or button click occurs
-        await recordDelivery(user.id, video.id);
-      } else {
+      const [{ video }, captionTemplate] = await Promise.all([
+        getNextVideoForUser(user.id),
+        getSetting("VIDEO_CAPTION_TEMPLATE"),
+      ]);
+
+      if (!video) {
+        await sendMessage(chatId, WATCHED_ALL_TEXT, { reply_markup: backToMenuKeyboard() });
+        return;
+      }
+
+      const caption =
+        video.caption ||
+        captionTemplate.replace("{sequence}", String(video.sequence));
+
+      try {
+        const sent = await sendVideoByFileId(chatId, video.telegramFileId, caption, {
+          reply_markup: videoPlaybackKeyboard(),
+          has_spoiler: true,
+          protect_content: true,
+        });
+
+        if (sent) {
+          // Await delivery record so PostgreSQL immediately persists the delivery
+          // before any subsequent request or button click occurs
+          await recordDelivery(user.id, video.id);
+        } else {
+          await sendMessage(
+            chatId,
+            "⚠️ Sorry, we couldn't deliver the video right now. Please try again with /video in a moment.",
+          );
+        }
+      } catch (err) {
+        console.error(`[bot] video delivery error (user_id=${user.id}):`, err instanceof Error ? err.message : err);
         await sendMessage(
           chatId,
-          "⚠️ Sorry, we couldn't deliver the video right now. Please try again with /video in a moment.",
+          "⚠️ Sorry, an error occurred while delivering your video. Please try again with /video in a moment.",
         );
       }
-    } catch (err) {
-      console.error("[bot] video delivery error:", err instanceof Error ? err.message : err);
-      await sendMessage(
-        chatId,
-        "⚠️ Sorry, an error occurred while delivering your video. Please try again with /video in a moment.",
-      );
+    } finally {
+      inFlightUsers.delete(user.id);
     }
-  } finally {
-    inFlightUsers.delete(user.id);
+  } catch (err) {
+    // Extract Postgres error code, routine, and message safely without leaking credentials/tokens
+    const pgError = err as { code?: string; routine?: string; severity?: string; detail?: string; message?: string };
+    const errMessage = pgError.message ?? String(err);
+    const errCode = pgError.code ?? "UNKNOWN";
+    console.error(
+      `[bot] video request failed for user_id=${user.id} telegram_id=${user.telegramId} pg_code=${errCode}: ${errMessage}`
+    );
+    await sendMessage(
+      chatId,
+      "⚠️ Sorry, we couldn't load the next video right now. Please try again with /video in a moment.",
+      { reply_markup: backToMenuKeyboard() }
+    ).catch(() => {});
   }
 }
 

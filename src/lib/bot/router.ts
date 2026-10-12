@@ -32,7 +32,14 @@ export async function processUpdate(update: TelegramUpdate): Promise<void> {
       await processCallbackQuery(update.callback_query);
     }
   } catch (err) {
-    console.error("[bot] unhandled error while processing update", err instanceof Error ? err.message : err);
+    const pgError = err as { code?: string; message?: string };
+    const errCode = pgError.code ? ` [pg_code=${pgError.code}]` : "";
+    const updateType = update.message
+      ? `message (from=${update.message.from?.id})`
+      : update.callback_query
+      ? `callback_query (from=${update.callback_query.from.id}, data=${update.callback_query.data})`
+      : "channel_post";
+    console.error(`[bot] unhandled error while processing ${updateType}${errCode}:`, err instanceof Error ? err.message : err);
   }
 }
 
