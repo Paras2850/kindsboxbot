@@ -350,6 +350,22 @@ async function runTests() {
       // Reset repeat mode setting to false
       await setSetting("REPEAT_MODE", "false");
 
+      // Test 16: Concurrent video selection for same user selects distinct newest videos
+      console.log("\nTest 16: Concurrent video selection for same user (excludeVideoIds)");
+      const [userD] = await db.insert(users).values({
+        telegramId: 998300000 + Math.floor(Math.random() * 100000),
+        firstName: "Test User D",
+      }).returning();
+      for (const row of existingDbVideos) {
+        await recordDelivery(userD.id, row.id);
+      }
+      // For User D, the top two newest unseen videos are vEq2 and vEq1
+      const req1 = await getNextVideoForUser(userD.id);
+      const req2 = await getNextVideoForUser(userD.id, { excludeVideoIds: [req1.video!.id] });
+      assert(req1.video?.id === vEq2.video.id, "Concurrent request 1 gets newest video");
+      assert(req2.video?.id === vEq1.video.id, "Concurrent request 2 safely picks next newest video without duplicating");
+      await db.delete(users).where(eq(users.id, userD.id));
+
     } finally {
       if (testUserAId) await db.delete(users).where(eq(users.id, testUserAId));
       if (testUserBId) await db.delete(users).where(eq(users.id, testUserBId));

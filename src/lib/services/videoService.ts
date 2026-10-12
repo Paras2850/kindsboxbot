@@ -216,29 +216,40 @@ export interface NextVideoResult {
   isRepeat: boolean;
 }
 
-export async function getNextVideoForUser(userId: number): Promise<NextVideoResult> {
+export interface GetNextVideoOptions {
+  excludeVideoIds?: number[];
+}
+
+export async function getNextVideoForUser(
+  userId: number,
+  options?: GetNextVideoOptions,
+): Promise<NextVideoResult> {
   const repeatMode = await isRepeatMode();
+
+  const unseenConditions = [
+    eq(videos.status, "active"),
+    notExists(
+      db
+        .select({ id: videoDeliveries.id })
+        .from(videoDeliveries)
+        .where(
+          and(
+            eq(videoDeliveries.videoId, videos.id),
+            eq(videoDeliveries.userId, userId),
+          ),
+        ),
+    ),
+  ];
+
+  if (options?.excludeVideoIds && options.excludeVideoIds.length > 0) {
+    unseenConditions.push(notInArray(videos.id, options.excludeVideoIds));
+  }
 
   // 1. Always prioritize the newest UNSEEN active video: uploadedAt DESC, id DESC
   const [unseenVideo] = await db
     .select()
     .from(videos)
-    .where(
-      and(
-        eq(videos.status, "active"),
-        notExists(
-          db
-            .select({ id: videoDeliveries.id })
-            .from(videoDeliveries)
-            .where(
-              and(
-                eq(videoDeliveries.videoId, videos.id),
-                eq(videoDeliveries.userId, userId),
-              ),
-            ),
-        ),
-      ),
-    )
+    .where(and(...unseenConditions))
     .orderBy(desc(videos.uploadedAt), desc(videos.id))
     .limit(1);
 
@@ -260,10 +271,15 @@ export async function getNextVideoForUser(userId: number): Promise<NextVideoResu
   if (totalActive === 0) return { video: null, isRepeat: false };
 
   const offset = deliveredCount % totalActive;
+  const repeatConditions = [eq(videos.status, "active")];
+  if (options?.excludeVideoIds && options.excludeVideoIds.length > 0) {
+    repeatConditions.push(notInArray(videos.id, options.excludeVideoIds));
+  }
+
   const [repeatVideo] = await db
     .select()
     .from(videos)
-    .where(eq(videos.status, "active"))
+    .where(and(...repeatConditions))
     .orderBy(desc(videos.uploadedAt), desc(videos.id))
     .limit(1)
     .offset(offset);

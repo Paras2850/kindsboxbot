@@ -86,7 +86,14 @@ export async function sendMyAccount(chatId: number, user: User) {
   await sendMessage(chatId, accountText(user, sub, watched, totalPaid, isFree), { reply_markup: backToMenuKeyboard() });
 }
 
+const inFlightUsers = new Set<number>();
+
 export async function handleVideoRequest(chatId: number, user: User) {
+  // Prevent duplicate concurrent dispatches for the same user (e.g. rapid double-clicking Next Video)
+  if (inFlightUsers.has(user.id)) {
+    return;
+  }
+
   const rate = checkRateLimit(`video:${user.telegramId}`, 1, 3000);
   if (!rate.allowed) {
     await sendMessage(chatId, "⏳ Please wait a few seconds before requesting another video.");
@@ -110,47 +117,51 @@ export async function handleVideoRequest(chatId: number, user: User) {
     }
   }
 
-  // Send instant visual feedback to user in Telegram while video is fetched/dispatched
-  sendChatAction(chatId, "upload_video").catch(() => {});
-
-  const [{ video }, captionTemplate] = await Promise.all([
-    getNextVideoForUser(user.id),
-    getSetting("VIDEO_CAPTION_TEMPLATE"),
-  ]);
-
-  if (!video) {
-    await sendMessage(chatId, WATCHED_ALL_TEXT, { reply_markup: backToMenuKeyboard() });
-    return;
-  }
-
-  const caption =
-    video.caption ||
-    captionTemplate.replace("{sequence}", String(video.sequence));
-
+  inFlightUsers.add(user.id);
   try {
-    const sent = await sendVideoByFileId(chatId, video.telegramFileId, caption, {
-      reply_markup: videoPlaybackKeyboard(),
-      has_spoiler: true,
-      protect_content: true,
-    });
+    // Send instant visual feedback to user in Telegram while video is fetched/dispatched
+    sendChatAction(chatId, "upload_video").catch(() => {});
 
-    if (sent) {
-      // Record delivery in background without blocking response
-      recordDelivery(user.id, video.id).catch((err) => {
-        console.error("[bot] failed to record video delivery", err);
+    const [{ video }, captionTemplate] = await Promise.all([
+      getNextVideoForUser(user.id),
+      getSetting("VIDEO_CAPTION_TEMPLATE"),
+    ]);
+
+    if (!video) {
+      await sendMessage(chatId, WATCHED_ALL_TEXT, { reply_markup: backToMenuKeyboard() });
+      return;
+    }
+
+    const caption =
+      video.caption ||
+      captionTemplate.replace("{sequence}", String(video.sequence));
+
+    try {
+      const sent = await sendVideoByFileId(chatId, video.telegramFileId, caption, {
+        reply_markup: videoPlaybackKeyboard(),
+        has_spoiler: true,
+        protect_content: true,
       });
-    } else {
+
+      if (sent) {
+        // Await delivery record so PostgreSQL immediately persists the delivery
+        // before any subsequent request or button click occurs
+        await recordDelivery(user.id, video.id);
+      } else {
+        await sendMessage(
+          chatId,
+          "⚠️ Sorry, we couldn't deliver the video right now. Please try again with /video in a moment.",
+        );
+      }
+    } catch (err) {
+      console.error("[bot] video delivery error:", err instanceof Error ? err.message : err);
       await sendMessage(
         chatId,
-        "⚠️ Sorry, we couldn't deliver the video right now. Please try again with /video in a moment.",
+        "⚠️ Sorry, an error occurred while delivering your video. Please try again with /video in a moment.",
       );
     }
-  } catch (err) {
-    console.error("[bot] video delivery error:", err instanceof Error ? err.message : err);
-    await sendMessage(
-      chatId,
-      "⚠️ Sorry, an error occurred while delivering your video. Please try again with /video in a moment.",
-    );
+  } finally {
+    inFlightUsers.delete(user.id);
   }
 }
 
