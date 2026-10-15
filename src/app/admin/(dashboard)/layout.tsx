@@ -4,6 +4,9 @@ import { getAdminSession } from "@/lib/auth/session";
 import { Sidebar } from "@/app/admin/_components/Sidebar";
 import { ToastProvider } from "@/app/admin/_components/Toast";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export default async function AdminDashboardLayout({ children }: { children: ReactNode }) {
   const session = await getAdminSession();
   if (!session) redirect("/admin/login");

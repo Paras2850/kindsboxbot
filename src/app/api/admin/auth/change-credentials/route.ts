@@ -176,6 +176,7 @@ export async function POST(req: NextRequest) {
         adminId: admin.id,
         username: updatedUsername,
         role: admin.role,
+        pvh: admin.passwordHash.slice(-8),
       });
       const res = NextResponse.json({
         ok: true,

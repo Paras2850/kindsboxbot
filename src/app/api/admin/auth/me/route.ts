@@ -4,5 +4,8 @@ import { getAdminSession } from "@/lib/auth/session";
 export async function GET() {
   const session = await getAdminSession();
   if (!session) return NextResponse.json({ ok: false }, { status: 401 });
-  return NextResponse.json({ ok: true, admin: session });
+  return NextResponse.json({
+    ok: true,
+    admin: { id: session.adminId, username: session.username, role: session.role },
+  });
 }

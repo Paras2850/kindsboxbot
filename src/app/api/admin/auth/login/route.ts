@@ -66,7 +66,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "Invalid username or password" }, { status: 401 });
     }
 
-    const token = await signAdminSession({ adminId: admin.id, username: admin.username, role: admin.role });
+    const token = await signAdminSession({
+      adminId: admin.id,
+      username: admin.username,
+      role: admin.role,
+      pvh: admin.passwordHash.slice(-8),
+    });
 
     const res = NextResponse.json({ ok: true, admin: { id: admin.id, username: admin.username, role: admin.role } });
     res.cookies.set(ADMIN_SESSION_COOKIE, token, {

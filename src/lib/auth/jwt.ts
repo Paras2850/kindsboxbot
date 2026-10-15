@@ -11,6 +11,7 @@ export interface AdminSessionPayload {
   adminId: number;
   username: string;
   role: string;
+  pvh?: string;
 }
 
 export async function signAdminSession(payload: AdminSessionPayload): Promise<string> {
@@ -29,7 +30,12 @@ export async function verifyAdminSession(token: string): Promise<AdminSessionPay
       typeof payload.username === "string" &&
       typeof payload.role === "string"
     ) {
-      return { adminId: payload.adminId, username: payload.username, role: payload.role };
+      return {
+        adminId: payload.adminId,
+        username: payload.username,
+        role: payload.role,
+        pvh: typeof payload.pvh === "string" ? payload.pvh : undefined,
+      };
     }
     return null;
   } catch {

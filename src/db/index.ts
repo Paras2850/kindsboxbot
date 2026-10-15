@@ -2,7 +2,12 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 
 function getDatabaseUrl(): string {
-  const raw = process.env.DATABASE_URL || "";
+  const raw =
+    process.env.DATABASE_URL ||
+    process.env.DATABASE_URL_UNPOOLED ||
+    process.env.POSTGRES_URL ||
+    process.env.POSTGRES_PRISMA_URL ||
+    "";
   return raw.replace(/^["']|["']$/g, "").trim();
 }
 
