@@ -33,7 +33,7 @@ export const env = {
         return c.replace(/\/+$/, "");
       }
     }
-    return "https://kindsboxbotadmin.vercel.app";
+    return "https://kindsboxbot.vercel.app";
   },
   get adminTelegramIds() {
     const raw = str("ADMIN_TELEGRAM_IDS") || str("TELEGRAM_ADMIN_ID") || str("TELEGRAM_ADMIN_IDS");
