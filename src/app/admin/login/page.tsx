@@ -93,8 +93,9 @@ export default function AdminLoginPage() {
               autoCapitalize="none"
               autoCorrect="off"
               spellCheck="false"
+              autoComplete="username"
               value={username}
-              onChange={(e) => setUsername(e.target.value)}
+              onChange={(e) => setUsername(e.target.value.replace(/[\u200B-\u200D\uFEFF\u200E\u200F]/g, ""))}
               className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
               placeholder="Username"
             />
@@ -113,6 +114,7 @@ export default function AdminLoginPage() {
             <input
               type={showPassword ? "text" : "password"}
               required
+              autoComplete="current-password"
               minLength={needsSetup ? 8 : undefined}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
