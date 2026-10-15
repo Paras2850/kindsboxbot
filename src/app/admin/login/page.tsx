@@ -8,6 +8,7 @@ export default function AdminLoginPage() {
   const [needsSetup, setNeedsSetup] = useState<boolean | null>(null);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [setupSecret, setSetupSecret] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -99,9 +100,18 @@ export default function AdminLoginPage() {
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-medium text-slate-400">Password</label>
+            <div className="mb-1 flex items-center justify-between">
+              <label className="block text-xs font-medium text-slate-400">Password</label>
+              <button
+                type="button"
+                onClick={() => setShowPassword((prev) => !prev)}
+                className="text-xs font-medium text-indigo-400 hover:text-indigo-300 focus:outline-none"
+              >
+                {showPassword ? "Hide" : "Show"}
+              </button>
+            </div>
             <input
-              type="password"
+              type={showPassword ? "text" : "password"}
               required
               minLength={needsSetup ? 8 : undefined}
               value={password}
