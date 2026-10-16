@@ -4,7 +4,6 @@ import { admins } from "@/db/schema";
 import { sql } from "drizzle-orm";
 import { verifyPassword } from "@/lib/auth/password";
 import { signAdminSession, ADMIN_SESSION_COOKIE } from "@/lib/auth/jwt";
-import { checkRateLimit } from "@/lib/rateLimit";
 import { logAudit } from "@/lib/services/auditService";
 import { z } from "zod";
 
@@ -18,19 +17,6 @@ const schema = z.object({
 export async function POST(req: NextRequest) {
   const rawIp = req.headers.get("x-forwarded-for") || req.headers.get("x-real-ip") || "unknown";
   const ip = rawIp.split(",")[0].trim();
-
-  const rate = checkRateLimit(`admin-login:${ip}`, 10, 5 * 60_000);
-  if (!rate.allowed) {
-    const retryMinutes = Math.ceil(rate.retryAfterMs / 60_000);
-    console.warn(`[admin/login] Rate limit exceeded from IP ${ip}, retry after ${retryMinutes}m`);
-    return NextResponse.json(
-      { ok: false, error: `Too many login attempts. Please wait ${retryMinutes} minute(s) before trying again.` },
-      {
-        status: 429,
-        headers: { "Retry-After": String(Math.ceil(rate.retryAfterMs / 1000)) },
-      }
-    );
-  }
 
   const json = await req.json().catch(() => null);
   const parsed = schema.safeParse(json);
